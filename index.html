@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>家事按分計算ツール</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1f2933; --sub: #616e7c; --line: #e1e4e8;
+    --accent: #2563eb; --accent-weak: #e8efff; --warn-bg: #fff7e0; --warn: #8a5a00;
+    --danger: #c0392b; --ok: #1e7f4f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.6; }
+  header { background: var(--card); border-bottom: 1px solid var(--line); padding: 12px 24px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  nav { display: flex; gap: 4px; }
+  nav button { border: none; background: none; padding: 8px 14px; border-radius: 6px; font-size: 14px; cursor: pointer; color: var(--sub); }
+  nav button.active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+  #calc-table td, #calc-table th, .copy, .formula { white-space: nowrap; }
+  #calc-table td.journal { white-space: normal; min-width: 200px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 20px 24px 60px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin: 0 0 12px; }
+  .banner { background: var(--warn-bg); color: var(--warn); border: 1px solid #f1d58a; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; display: none; }
+  .banner.show { display: block; }
+  .row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  label { display: block; font-size: 12px; color: var(--sub); margin-bottom: 4px; }
+  input, select { font: inherit; padding: 7px 10px; border: 1px solid #cbd2d9; border-radius: 6px; background: #fff; }
+  input:focus, select:focus { outline: 2px solid var(--accent-weak); border-color: var(--accent); }
+  input.num { width: 90px; }
+  input.amount { width: 130px; text-align: right; }
+  input.rate { width: 90px; text-align: right; }
+  select.client { min-width: 220px; }
+  button.btn { font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 6px; border: 1px solid #cbd2d9; background: #fff; cursor: pointer; }
+  button.btn:hover { background: #f0f2f5; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover { background: #1d4fd0; }
+  button.danger { color: var(--danger); border-color: #e6b8b2; }
+  button.small { padding: 3px 10px; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 12px; color: var(--sub); font-weight: 600; background: #fafbfc; }
+  td.r, th.r { text-align: right; }
+  .copy { display: inline-block; padding: 3px 10px; border-radius: 6px; background: var(--accent-weak); color: var(--accent); cursor: pointer; font-weight: 600; user-select: none; }
+  .copy:hover { background: #d6e2ff; }
+  .copy.empty { background: none; color: #9aa5b1; cursor: default; font-weight: normal; }
+  .formula { font-size: 12px; color: var(--sub); }
+  .muted { color: var(--sub); font-size: 13px; }
+  .err { color: var(--danger); font-size: 13px; min-height: 1.2em; }
+  .journal { font-size: 13px; white-space: nowrap; }
+  #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: #1f2933; color: #fff; padding: 8px 18px; border-radius: 20px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  .hidden { display: none !important; }
+  .total td { font-weight: 600; background: #fafbfc; }
+</style>
+</head>
+<body>
+<header>
+  <h1>家事按分計算ツール</h1>
+  <nav>
+    <button id="tab-calc" class="active" data-view="calc">計算</button>
+    <button id="tab-master" data-view="master">マスタ編集</button>
+    <button id="tab-backup" data-view="backup">バックアップ</button>
+  </nav>
+</header>
+
+<main>
+  <div id="banner" class="banner"></div>
+
+  <!-- 計算画面 -->
+  <section id="view-calc">
+    <div class="card">
+      <div class="row">
+        <div>
+          <label for="calc-no">顧客番号</label>
+          <input id="calc-no" class="num" inputmode="numeric" autocomplete="off" placeholder="例: 20">
+        </div>
+        <div>
+          <label for="calc-client">顧客</label>
+          <select id="calc-client" class="client"></select>
+        </div>
+        <button id="calc-clear" class="btn">金額をクリア</button>
+      </div>
+      <div id="calc-no-err" class="err"></div>
+    </div>
+
+    <div class="card" id="calc-result-card">
+      <div id="calc-empty" class="muted">顧客を選んでください。</div>
+      <div id="calc-noitems" class="muted hidden">この顧客には按分科目が登録されていません。「マスタ編集」から登録してください。</div>
+      <table id="calc-table" class="hidden">
+        <thead>
+          <tr>
+            <th>科目</th>
+            <th class="r">家事割合</th>
+            <th class="r">今月の総額</th>
+            <th class="r">家事分（クリックでコピー）</th>
+            <th>摘要（クリックでコピー）</th>
+            <th>仕訳</th>
+          </tr>
+        </thead>
+        <tbody id="calc-body"></tbody>
+      </table>
+      <p class="muted hidden" id="calc-note" style="margin:12px 0 0">端数は1円未満を四捨五入しています。入力した総額は保存されません（画面を閉じると消えます）。</p>
+    </div>
+  </section>
+
+  <!-- マスタ編集画面 -->
+  <section id="view-master" class="hidden">
+    <div class="card">
+      <h2>顧客を追加</h2>
+      <div class="row">
+        <div>
+          <label for="add-no">顧客番号</label>
+          <input id="add-no" class="num" inputmode="numeric" autocomplete="off" placeholder="例: 12">
+        </div>
+        <div>
+          <label for="add-name">苗字（「さん」は自動で付きます）</label>
+          <input id="add-name" autocomplete="off" placeholder="例: 山田">
+        </div>
+        <button id="add-client" class="btn primary">追加</button>
+      </div>
+      <div id="add-err" class="err"></div>
+    </div>
+
+    <div class="card">
+      <h2>顧客ごとの按分科目</h2>
+      <div class="row">
+        <div>
+          <label for="m-no">顧客番号</label>
+          <input id="m-no" class="num" inputmode="numeric" autocomplete="off">
+        </div>
+        <div>
+          <label for="m-client">顧客</label>
+          <select id="m-client" class="client"></select>
+        </div>
+      </div>
+      <div id="m-no-err" class="err"></div>
+
+      <div id="m-detail" class="hidden">
+        <div class="row" style="margin:6px 0 14px">
+          <div>
+            <label for="m-edit-no">顧客番号を変更</label>
+            <input id="m-edit-no" class="num" inputmode="numeric" autocomplete="off">
+          </div>
+          <div>
+            <label for="m-edit-name">苗字を変更</label>
+            <input id="m-edit-name" autocomplete="off">
+          </div>
+          <button id="m-save-client" class="btn">番号・苗字を保存</button>
+          <button id="m-delete-client" class="btn danger">この顧客を削除</button>
+        </div>
+        <div id="m-client-err" class="err"></div>
+
+        <table>
+          <thead>
+            <tr><th>科目</th><th class="r">家事割合（%）</th><th>根拠メモ（任意）</th><th></th></tr>
+          </thead>
+          <tbody id="m-items"></tbody>
+          <tfoot>
+            <tr>
+              <td><input id="new-account" list="account-list" autocomplete="off" placeholder="科目を選択または入力"></td>
+              <td class="r"><input id="new-rate" class="rate" inputmode="decimal" autocomplete="off" placeholder="例: 20"></td>
+              <td><input id="new-memo" autocomplete="off" placeholder="例: 床面積"></td>
+              <td><button id="add-item" class="btn primary small">科目を追加</button></td>
+            </tr>
+          </tfoot>
+        </table>
+        <div id="item-err" class="err"></div>
+        <p class="muted" style="margin:4px 0 0">割合は小数第2位まで入力できます（例: 33.33）。表の中の値は書き換えると自動で保存されます。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- バックアップ画面 -->
+  <section id="view-backup" class="hidden">
+    <div class="card">
+      <h2>バックアップを書き出す</h2>
+      <p class="muted" style="margin-top:0">顧客・科目・割合をファイル（JSON形式）としてPCに保存します。マスタを変更したら書き出してください。</p>
+      <button id="export" class="btn primary">バックアップを書き出す</button>
+      <p class="muted" id="last-export"></p>
+    </div>
+    <div class="card">
+      <h2>バックアップを読み込む</h2>
+      <p class="muted" style="margin-top:0">書き出したファイルを読み込むと、現在のマスタはすべて置き換わります。</p>
+      <input type="file" id="import-file" accept=".json,application/json">
+      <div id="import-err" class="err"></div>
+    </div>
+  </section>
+</main>
+
+<datalist id="account-list">
+  <option value="車両費"></option>
+  <option value="地代家賃"></option>
+  <option value="水道光熱費"></option>
+  <option value="損害保険料"></option>
+  <option value="通信費"></option>
+  <option value="利子割引料"></option>
+</datalist>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "kajiAnbunTool_v1";
+  var DATA_VERSION = 1;
+
+  // 配布版：初期データなし（空の状態で始まる）
+  var INITIAL_CLIENTS = [];
+
+  var state = null;          // { version, clients:[{no, name, items:[{account, rateBp, memo}]}], modifiedAt, exportedAt }
+  var storageOk = true;
+  var seededNow = false;
+  var calcAmounts = {};      // 画面上だけの金額（保存しない）
+
+  // ---------- 共通ユーティリティ ----------
+  function $(id) { return document.getElementById(id); }
+
+  function toHalfWidth(s) {
+    return String(s).replace(/[０-９．，％]/g, function (c) {
+      return String.fromCharCode(c.charCodeAt(0) - 0xFEE0);
+    }).replace(/[\s　]/g, "");
+  }
+
+  // 顧客番号：正の整数のみ。先頭のゼロは取り除く（ゼロ埋めしない）
+  function parseClientNo(s) {
+    var t = toHalfWidth(s);
+    if (!/^\d+$/.test(t)) return null;
+    var n = parseInt(t, 10);
+    if (!(n >= 1) || n > 999999) return null;
+    return n;
+  }
+
+  // 割合：0より大きく100以下、小数第2位まで → 1/100%単位の整数（例 33.33% → 3333）
+  function parseRate(s) {
+    var t = toHalfWidth(s).replace(/%$/, "");
+    if (!/^\d{1,3}(\.\d{1,2})?$/.test(t)) return null;
+    var parts = t.split(".");
+    var bp = parseInt(parts[0], 10) * 100 + (parts[1] ? parseInt((parts[1] + "0").slice(0, 2), 10) : 0);
+    if (bp <= 0 || bp > 10000) return null;
+    return bp;
+  }
+
+  function rateText(bp) {
+    var whole = Math.floor(bp / 100), frac = bp % 100;
+    if (frac === 0) return String(whole);
+    var f = (frac < 10 ? "0" : "") + frac;
+    return whole + "." + f.replace(/0$/, "");
+  }
+
+  // 金額：0以上の整数（カンマ・全角可）
+  function parseAmount(s) {
+    var t = toHalfWidth(s).replace(/,/g, "");
+    if (t === "") return null;
+    if (!/^\d{1,12}$/.test(t)) return NaN;
+    return parseInt(t, 10);
+  }
+
+  // 家事分 = 総額 × 割合、1円未満四捨五入（整数演算で誤差なし）
+  function calcHousehold(amount, bp) {
+    return Math.floor((amount * bp + 5000) / 10000);
+  }
+
+  function fmt(n) { return n.toLocaleString("ja-JP"); }
+
+  function cleanName(s) {
+    return String(s).trim().replace(/[\s　]+/g, "").replace(/(さん|様|さま)$/, "");
+  }
+
+  function clientLabel(c) { return c.no + "　" + c.name + "さん"; }
+
+  function nowIso() { return new Date().toISOString(); }
+
+  function showToast(msg) {
+    var t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(function () { t.classList.remove("show"); }, 1400);
+  }
+
+  function copyText(text) {
+    function fallback() {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      showToast(ok ? "コピーしました：" + text : "コピーできませんでした");
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        showToast("コピーしました：" + text);
+      }, fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  // ---------- 保存・読み込み ----------
+  function validData(d) {
+    if (!d || typeof d !== "object" || !Array.isArray(d.clients)) return false;
+    var seen = {};
+    for (var i = 0; i < d.clients.length; i++) {
+      var c = d.clients[i];
+      if (!c || typeof c.no !== "number" || !(c.no >= 1) || Math.floor(c.no) !== c.no) return false;
+      if (typeof c.name !== "string" || c.name === "") return false;
+      if (seen[c.no]) return false;
+      seen[c.no] = true;
+      if (!Array.isArray(c.items)) return false;
+      for (var j = 0; j < c.items.length; j++) {
+        var it = c.items[j];
+        if (!it || typeof it.account !== "string" || it.account === "") return false;
+        if (typeof it.rateBp !== "number" || Math.floor(it.rateBp) !== it.rateBp || it.rateBp <= 0 || it.rateBp > 10000) return false;
+        if (it.memo != null && typeof it.memo !== "string") return false;
+      }
+    }
+    return true;
+  }
+
+  function seedData() {
+    return {
+      version: DATA_VERSION,
+      clients: INITIAL_CLIENTS.map(function (p) { return { no: p[0], name: p[1], items: [] }; }),
+      modifiedAt: null,
+      exportedAt: null
+    };
+  }
+
+  function load() {
+    var raw = null;
+    try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { storageOk = false; }
+    if (raw) {
+      try {
+        var d = JSON.parse(raw);
+        if (validData(d)) { state = d; return; }
+      } catch (e) { /* 壊れていれば下で初期化しない */ }
+      state = seedData();
+      showBanner("保存データが読み取れませんでした。「バックアップ」からバックアップを読み込んでください。");
+      return;
+    }
+    state = seedData();
+    seededNow = true;
+    save(false);
+  }
+
+  function save(markModified) {
+    if (markModified) state.modifiedAt = nowIso();
+    sortClients();
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      storageOk = false;
+    }
+    updateBanner();
+  }
+
+  function sortClients() {
+    state.clients.sort(function (a, b) { return a.no - b.no; });
+  }
+
+  function findClient(no) {
+    for (var i = 0; i < state.clients.length; i++) if (state.clients[i].no === no) return state.clients[i];
+    return null;
+  }
+
+  // ---------- お知らせ表示 ----------
+  var fixedBannerMsg = "";
+  function showBanner(msg) { fixedBannerMsg = msg; updateBanner(); }
+
+  function updateBanner() {
+    var msgs = [];
+    if (!storageOk) msgs.push("このブラウザではデータを保存できません（シークレットウィンドウなど）。通常のChromeウィンドウで開いてください。");
+    if (fixedBannerMsg) msgs.push(fixedBannerMsg);
+    if (state && state.clients.length === 0) msgs.push("顧客が未登録です。「マスタ編集」から登録するか、以前のデータがある場合は「バックアップ」からバックアップを読み込んでください。");
+    if (state && state.modifiedAt && (!state.exportedAt || state.exportedAt < state.modifiedAt)) {
+      msgs.push("マスタが変更されています。「バックアップ」から書き出しておくと安心です。");
+    }
+    var b = $("banner");
+    b.textContent = "";
+    msgs.forEach(function (m, i) {
+      if (i) b.appendChild(document.createElement("br"));
+      b.appendChild(document.createTextNode("⚠ " + m));
+    });
+    b.classList.toggle("show", msgs.length > 0);
+  }
+
+  // ---------- 画面切り替え ----------
+  function switchView(v) {
+    ["calc", "master", "backup"].forEach(function (name) {
+      $("view-" + name).classList.toggle("hidden", name !== v);
+      $("tab-" + name).classList.toggle("active", name === v);
+    });
+    if (v === "calc") { fillClientSelect($("calc-client"), currentCalcNo); renderCalc(); }
+    if (v === "master") { fillClientSelect($("m-client"), currentMasterNo); renderMaster(); }
+    if (v === "backup") renderBackup();
+  }
+
+  function fillClientSelect(sel, selectedNo) {
+    sel.textContent = "";
+    var opt0 = document.createElement("option");
+    opt0.value = ""; opt0.textContent = "（顧客を選択）";
+    sel.appendChild(opt0);
+    state.clients.forEach(function (c) {
+      var o = document.createElement("option");
+      o.value = String(c.no);
+      o.textContent = clientLabel(c);
+      sel.appendChild(o);
+    });
+    sel.value = selectedNo && findClient(selectedNo) ? String(selectedNo) : "";
+  }
+
+  // ---------- 計算画面 ----------
+  var currentCalcNo = null;
+
+  function setCalcClient(no, fromNoInput) {
+    currentCalcNo = no;
+    calcAmounts = {};
+    if (!fromNoInput) $("calc-no").value = no ? String(no) : "";
+    $("calc-client").value = no ? String(no) : "";
+    renderCalc();
+  }
+
+  function renderCalc() {
+    var c = currentCalcNo ? findClient(currentCalcNo) : null;
+    var body = $("calc-body");
+    body.textContent = "";
+    $("calc-empty").classList.toggle("hidden", !!c);
+    $("calc-noitems").classList.toggle("hidden", !c || c.items.length > 0);
+    $("calc-table").classList.toggle("hidden", !c || c.items.length === 0);
+    $("calc-note").classList.toggle("hidden", !c || c.items.length === 0);
+    if (!c || c.items.length === 0) return;
+
+    c.items.forEach(function (it, idx) {
+      var tr = document.createElement("tr");
+
+      var tdA = document.createElement("td"); tdA.textContent = it.account; tr.appendChild(tdA);
+      var tdR = document.createElement("td"); tdR.className = "r"; tdR.textContent = rateText(it.rateBp) + "%"; tr.appendChild(tdR);
+
+      var tdIn = document.createElement("td"); tdIn.className = "r";
+      var inp = document.createElement("input");
+      inp.className = "amount"; inp.inputMode = "numeric"; inp.autocomplete = "off"; inp.placeholder = "0";
+      inp.value = calcAmounts[idx] != null ? calcAmounts[idx] : "";
+      tdIn.appendChild(inp);
+      var errDiv = document.createElement("div"); errDiv.className = "err"; tdIn.appendChild(errDiv);
+      tr.appendChild(tdIn);
+
+      var tdRes = document.createElement("td"); tdRes.className = "r";
+      var resSpan = document.createElement("span");
+      var formula = document.createElement("div"); formula.className = "formula";
+      tdRes.appendChild(resSpan); tdRes.appendChild(formula);
+      tr.appendChild(tdRes);
+
+      var summary = "家事按分（" + rateText(it.rateBp) + "%）";
+      var tdS = document.createElement("td");
+      var sSpan = document.createElement("span"); sSpan.className = "copy"; sSpan.textContent = summary;
+      sSpan.addEventListener("click", function () { copyText(summary); });
+      tdS.appendChild(sSpan);
+      tr.appendChild(tdS);
+
+      var tdJ = document.createElement("td"); tdJ.className = "journal";
+      tr.appendChild(tdJ);
+
+      function update() {
+        var a = parseAmount(inp.value);
+        calcAmounts[idx] = inp.value;
+        errDiv.textContent = "";
+        resSpan.onclick = null;
+        if (a === null) {
+          resSpan.className = "copy empty"; resSpan.textContent = "—"; formula.textContent = "";
+          tdJ.textContent = "借方 事業主貸 ／ 貸方 " + it.account;
+        } else if (isNaN(a)) {
+          resSpan.className = "copy empty"; resSpan.textContent = "—"; formula.textContent = "";
+          errDiv.textContent = "数字のみ入力してください";
+          tdJ.textContent = "借方 事業主貸 ／ 貸方 " + it.account;
+        } else {
+          var h = calcHousehold(a, it.rateBp);
+          resSpan.className = "copy"; resSpan.textContent = fmt(h);
+          resSpan.onclick = function () { copyText(String(h)); };
+          formula.textContent = fmt(a) + " × " + rateText(it.rateBp) + "% = " + fmt(h);
+          tdJ.textContent = "借方 事業主貸 " + fmt(h) + " ／ 貸方 " + it.account + " " + fmt(h);
+        }
+        updateTotal();
+      }
+      inp.addEventListener("input", update);
+      inp.addEventListener("blur", function () {
+        var a = parseAmount(inp.value);
+        if (a !== null && !isNaN(a)) { inp.value = fmt(a); calcAmounts[idx] = inp.value; }
+      });
+      inp.addEventListener("focus", function () {
+        inp.value = inp.value.replace(/,/g, "");
+      });
+      body.appendChild(tr);
+      update();
+    });
+
+    var trT = document.createElement("tr"); trT.className = "total"; trT.id = "calc-total-row";
+    var td1 = document.createElement("td"); td1.textContent = "家事分 合計"; td1.colSpan = 3; trT.appendChild(td1);
+    var td2 = document.createElement("td"); td2.className = "r"; td2.id = "calc-total"; trT.appendChild(td2);
+    var td3 = document.createElement("td"); td3.colSpan = 2; trT.appendChild(td3);
+    body.appendChild(trT);
+    updateTotal();
+  }
+
+  function updateTotal() {
+    var el = $("calc-total");
+    var c = currentCalcNo ? findClient(currentCalcNo) : null;
+    if (!el || !c) return;
+    var sum = 0, any = false;
+    c.items.forEach(function (it, idx) {
+      var a = parseAmount(calcAmounts[idx] || "");
+      if (a !== null && !isNaN(a)) { sum += calcHousehold(a, it.rateBp); any = true; }
+    });
+    el.textContent = "";
+    var s = document.createElement("span");
+    if (any) {
+      s.className = "copy"; s.textContent = fmt(sum);
+      s.onclick = function () { copyText(String(sum)); };
+    } else { s.className = "copy empty"; s.textContent = "—"; }
+    el.appendChild(s);
+  }
+
+  // ---------- マスタ編集画面 ----------
+  var currentMasterNo = null;
+
+  function setMasterClient(no, fromNoInput) {
+    currentMasterNo = no;
+    if (!fromNoInput) $("m-no").value = no ? String(no) : "";
+    $("m-client").value = no ? String(no) : "";
+    $("m-client-err").textContent = "";
+    $("item-err").textContent = "";
+    renderMaster();
+  }
+
+  function renderMaster() {
+    var c = currentMasterNo ? findClient(currentMasterNo) : null;
+    $("m-detail").classList.toggle("hidden", !c);
+    if (!c) return;
+    $("m-edit-no").value = String(c.no);
+    $("m-edit-name").value = c.name;
+
+    var tb = $("m-items");
+    tb.textContent = "";
+    if (c.items.length === 0) {
+      var tr0 = document.createElement("tr");
+      var td0 = document.createElement("td"); td0.colSpan = 4; td0.className = "muted"; td0.textContent = "按分科目はまだ登録されていません。下の欄から追加してください。";
+      tr0.appendChild(td0); tb.appendChild(tr0);
+    }
+    c.items.forEach(function (it, idx) {
+      var tr = document.createElement("tr");
+
+      var tdA = document.createElement("td");
+      var a = document.createElement("input"); a.value = it.account; a.setAttribute("list", "account-list"); a.autocomplete = "off";
+      a.addEventListener("change", function () {
+        var v = a.value.trim();
+        if (!v) { a.value = it.account; $("item-err").textContent = "科目名を空にはできません"; return; }
+        if (c.items.some(function (x, j) { return j !== idx && x.account === v; })) {
+          a.value = it.account; $("item-err").textContent = "同じ科目がすでに登録されています"; return;
+        }
+        it.account = v; $("item-err").textContent = ""; save(true); showToast("保存しました");
+      });
+      tdA.appendChild(a); tr.appendChild(tdA);
+
+      var tdR = document.createElement("td"); tdR.className = "r";
+      var r = document.createElement("input"); r.className = "rate"; r.inputMode = "decimal"; r.autocomplete = "off"; r.value = rateText(it.rateBp);
+      r.addEventListener("change", function () {
+        var bp = parseRate(r.value);
+        if (bp === null) { r.value = rateText(it.rateBp); $("item-err").textContent = "割合は0より大きく100以下、小数第2位までで入力してください"; return; }
+        it.rateBp = bp; r.value = rateText(bp); $("item-err").textContent = ""; save(true); showToast("保存しました");
+      });
+      tdR.appendChild(r); tr.appendChild(tdR);
+
+      var tdM = document.createElement("td");
+      var m = document.createElement("input"); m.value = it.memo || ""; m.autocomplete = "off";
+      m.addEventListener("change", function () { it.memo = m.value.trim(); save(true); showToast("保存しました"); });
+      tdM.appendChild(m); tr.appendChild(tdM);
+
+      var tdD = document.createElement("td");
+      var d = document.createElement("button"); d.className = "btn danger small"; d.textContent = "削除";
+      d.addEventListener("click", function () {
+        if (!confirm(clientLabel(c) + "の「" + it.account + "」を削除します。よろしいですか？")) return;
+        c.items.splice(idx, 1); save(true); renderMaster(); showToast("削除しました");
+      });
+      tdD.appendChild(d); tr.appendChild(tdD);
+
+      tb.appendChild(tr);
+    });
+  }
+
+  function addClient() {
+    var err = $("add-err"); err.textContent = "";
+    var no = parseClientNo($("add-no").value);
+    var name = cleanName($("add-name").value);
+    if (no === null) { err.textContent = "顧客番号は1以上の数字で入力してください"; return; }
+    if (findClient(no)) { err.textContent = "顧客番号 " + no + " はすでに使われています（" + clientLabel(findClient(no)) + "）"; return; }
+    if (!name) { err.textContent = "苗字を入力してください"; return; }
+    state.clients.push({ no: no, name: name, items: [] });
+    save(true);
+    $("add-no").value = ""; $("add-name").value = "";
+    fillClientSelect($("m-client"), no);
+    setMasterClient(no);
+    showToast("追加しました：" + no + "　" + name + "さん");
+  }
+
+  function saveClientInfo() {
+    var c = findClient(currentMasterNo); if (!c) return;
+    var err = $("m-client-err"); err.textContent = "";
+    var no = parseClientNo($("m-edit-no").value);
+    var name = cleanName($("m-edit-name").value);
+    if (no === null) { err.textContent = "顧客番号は1以上の数字で入力してください"; return; }
+    if (no !== c.no && findClient(no)) { err.textContent = "顧客番号 " + no + " はすでに使われています"; return; }
+    if (!name) { err.textContent = "苗字を入力してください"; return; }
+    if (no === c.no && name === c.name) { $("m-edit-name").value = name; return; }
+    if (currentCalcNo === c.no) currentCalcNo = no;
+    c.no = no; c.name = name;
+    save(true);
+    fillClientSelect($("m-client"), no);
+    setMasterClient(no);
+    showToast("保存しました");
+  }
+
+  function deleteClient() {
+    var c = findClient(currentMasterNo); if (!c) return;
+    var msg = clientLabel(c) + "を削除します。";
+    if (c.items.length) msg += "\n登録済みの按分科目（" + c.items.length + "件）も削除されます。";
+    msg += "\nよろしいですか？";
+    if (!confirm(msg)) return;
+    state.clients = state.clients.filter(function (x) { return x.no !== c.no; });
+    if (currentCalcNo === c.no) currentCalcNo = null;
+    save(true);
+    fillClientSelect($("m-client"), null);
+    setMasterClient(null);
+    showToast("削除しました");
+  }
+
+  function addItem() {
+    var c = findClient(currentMasterNo); if (!c) return;
+    var err = $("item-err"); err.textContent = "";
+    var account = $("new-account").value.trim();
+    var bp = parseRate($("new-rate").value);
+    var memo = $("new-memo").value.trim();
+    if (!account) { err.textContent = "科目を入力してください"; return; }
+    if (c.items.some(function (x) { return x.account === account; })) { err.textContent = "同じ科目がすでに登録されています"; return; }
+    if (bp === null) { err.textContent = "割合は0より大きく100以下、小数第2位までで入力してください"; return; }
+    c.items.push({ account: account, rateBp: bp, memo: memo });
+    save(true);
+    $("new-account").value = ""; $("new-rate").value = ""; $("new-memo").value = "";
+    renderMaster();
+    $("new-account").focus();
+    showToast("追加しました：" + account + " " + rateText(bp) + "%");
+  }
+
+  // ---------- バックアップ ----------
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+
+  function renderBackup() {
+    var el = $("last-export");
+    if (state.exportedAt) {
+      var d = new Date(state.exportedAt);
+      el.textContent = "前回の書き出し：" + d.getFullYear() + "/" + pad(d.getMonth() + 1) + "/" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+    } else {
+      el.textContent = "まだ書き出していません。";
+    }
+  }
+
+  function exportData() {
+    var d = new Date();
+    state.exportedAt = nowIso();
+    var out = { version: state.version, clients: state.clients, modifiedAt: state.modifiedAt, exportedAt: state.exportedAt };
+    var blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "家事按分マスタ_" + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + "_" + pad(d.getHours()) + pad(d.getMinutes()) + ".json";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    seededNow = false;
+    save(false);
+    renderBackup();
+    showToast("書き出しました");
+  }
+
+  function importData(file) {
+    var err = $("import-err"); err.textContent = "";
+    var reader = new FileReader();
+    reader.onload = function () {
+      var d;
+      try { d = JSON.parse(reader.result); } catch (e) { err.textContent = "ファイルを読み取れませんでした（JSON形式ではありません）"; return; }
+      if (!validData(d)) { err.textContent = "このツールのバックアップファイルではないか、内容が壊れています"; return; }
+      var itemCount = d.clients.reduce(function (s, c) { return s + c.items.length; }, 0);
+      if (!confirm("顧客" + d.clients.length + "名・按分科目" + itemCount + "件のデータを読み込みます。\n現在のマスタはすべて置き換わります。よろしいですか？")) return;
+      state = {
+        version: DATA_VERSION,
+        clients: d.clients.map(function (c) {
+          return { no: c.no, name: c.name, items: c.items.map(function (it) { return { account: it.account, rateBp: it.rateBp, memo: it.memo || "" }; }) };
+        }),
+        modifiedAt: d.modifiedAt || null,
+        exportedAt: d.exportedAt || d.modifiedAt || null
+      };
+      seededNow = false; fixedBannerMsg = "";
+      currentCalcNo = null; currentMasterNo = null;
+      save(false);
+      renderBackup();
+      showToast("読み込みました");
+    };
+    reader.onerror = function () { err.textContent = "ファイルを読み取れませんでした"; };
+    reader.readAsText(file, "utf-8");
+  }
+
+  // ---------- イベント登録 ----------
+  function bindNoInput(inputId, errId, setter) {
+    $(inputId).addEventListener("input", function () {
+      var v = $(inputId).value.trim();
+      $(errId).textContent = "";
+      if (v === "") { setter(null, true); return; }
+      var no = parseClientNo(v);
+      if (no === null) { $(errId).textContent = "数字で入力してください"; setter(null, true); return; }
+      if (!findClient(no)) { $(errId).textContent = "顧客番号 " + no + " は登録されていません"; setter(null, true); return; }
+      setter(no, true);
+    });
+  }
+
+  document.querySelectorAll("nav button").forEach(function (b) {
+    b.addEventListener("click", function () { switchView(b.getAttribute("data-view")); });
+  });
+
+  bindNoInput("calc-no", "calc-no-err", setCalcClient);
+  $("calc-client").addEventListener("change", function () {
+    $("calc-no-err").textContent = "";
+    setCalcClient($("calc-client").value ? parseInt($("calc-client").value, 10) : null);
+  });
+  $("calc-clear").addEventListener("click", function () { calcAmounts = {}; renderCalc(); });
+
+  bindNoInput("m-no", "m-no-err", setMasterClient);
+  $("m-client").addEventListener("change", function () {
+    $("m-no-err").textContent = "";
+    setMasterClient($("m-client").value ? parseInt($("m-client").value, 10) : null);
+  });
+  $("add-client").addEventListener("click", addClient);
+  $("add-name").addEventListener("keydown", function (e) { if (e.key === "Enter") addClient(); });
+  $("m-save-client").addEventListener("click", saveClientInfo);
+  $("m-delete-client").addEventListener("click", deleteClient);
+  $("add-item").addEventListener("click", addItem);
+  ["new-account", "new-rate", "new-memo"].forEach(function (id) {
+    $(id).addEventListener("keydown", function (e) { if (e.key === "Enter") addItem(); });
+  });
+  $("export").addEventListener("click", exportData);
+  $("import-file").addEventListener("change", function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (f) importData(f);
+    e.target.value = "";
+  });
+
+  // テスト用に計算関数だけ公開（画面の動作には影響しない）
+  window.__kajiAnbunTest = { calcHousehold: calcHousehold, parseRate: parseRate, rateText: rateText, parseAmount: parseAmount, parseClientNo: parseClientNo, cleanName: cleanName };
+
+  load();
+  updateBanner();
+  switchView("calc");
+})();
+</script>
+</body>
+</html>
